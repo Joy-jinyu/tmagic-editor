@@ -9,10 +9,11 @@ import { Bottom, CopyDocument, Delete, DocumentCopy, Top } from '@element-plus/i
 import { NodeType } from '@tmagic/schema';
 import { isPage } from '@tmagic/utils';
 
-import ContentMenu from '@editor/components/ContentMenu.vue';
-import storageService from '@editor/services/storage';
-import { LayerOffset, Layout, MenuButton, MenuComponent, Services } from '@editor/type';
-import { COPY_STORAGE_KEY } from '@editor/utils/editor';
+import ContentMenu from '../../components/ContentMenu.vue';
+import storageService from '../../services/storage';
+import { LayerOffset, Layout, MenuButton, MenuComponent, Services } from '../../type';
+import { COPY_STORAGE_KEY } from '../../utils/editor';
+import { getMakeGroupRoot, getRedoMakeNodes } from '../../utils/group';
 
 const props = withDefaults(
   defineProps<{ isMultiSelect?: boolean; stageContentMenu: (MenuButton | MenuComponent)[] }>(),
@@ -129,6 +130,30 @@ const menuData = computed<(MenuButton | MenuComponent)[]>(() => [
     text: '清空参考线',
     handler: () => {
       editorService?.get('stage')?.clearGuides();
+    },
+  },
+  {
+    type: 'button',
+    text: '编组',
+    display: () => props.isMultiSelect,
+    handler: async () => {
+      const nodeList = nodes.value || [];
+      const containerRoot = getMakeGroupRoot(nodeList);
+      await editorService?.remove(nodeList);
+      if (containerRoot) {
+        await editorService?.add(containerRoot);
+      }
+    },
+  },
+  {
+    type: 'button',
+    text: '取消编组',
+    display: () => !isPage(node.value) && !props.isMultiSelect && node.value?.type === NodeType.CONTAINER,
+    handler: async () => {
+      if (!node.value) return;
+      const childrenList = getRedoMakeNodes(node.value);
+      await editorService?.remove(node.value);
+      await editorService?.add(childrenList);
     },
   },
   ...props.stageContentMenu,

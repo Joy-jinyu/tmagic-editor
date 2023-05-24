@@ -4,7 +4,7 @@ import type { EventOption } from '@tmagic/core';
 import type { FormConfig } from '@tmagic/form';
 import type { MApp, MNode } from '@tmagic/schema';
 import StageCore, {
-  CONTAINER_HIGHLIGHT_CLASS_NAME,
+  CONTAINER_HIGHLIGHT_CLASS_NAME_INSERT,
   ContainerHighlightType,
   CustomizeMoveableOptionsCallbackConfig,
   MoveableOptions,
@@ -103,7 +103,7 @@ export default {
 
   containerHighlightClassName: {
     type: String,
-    default: CONTAINER_HIGHLIGHT_CLASS_NAME,
+    default: CONTAINER_HIGHLIGHT_CLASS_NAME_INSERT,
   },
 
   containerHighlightDuration: {

@@ -35,7 +35,7 @@ import MoveableHelper from 'moveable-helper';
 import { DRAG_EL_ID_PREFIX, GHOST_EL_ID_PREFIX, Mode, ZIndex } from './const';
 import TargetShadow from './TargetShadow';
 import { DragResizeHelperConfig, Rect, TargetElement } from './types';
-import { calcValueByFontsize, getAbsolutePosition, getOffset } from './util';
+import { calcValueByFontsize, elementStyle, getAbsolutePosition, getOffset, isContainerEl } from './util';
 
 /**
  * 拖拽/改变大小等操作发生时，moveable会抛出各种状态事件，DragResizeHelper负责响应这些事件，对目标节点target和拖拽节点targetShadow进行修改；
@@ -56,9 +56,12 @@ export default class DragResizeHelper {
   private ghostEl: HTMLElement | undefined;
   /** 用于记录节点被改变前的位置 */
   private frameSnapShot = {
+    width: 0,
+    height: 0,
     left: 0,
     top: 0,
   };
+  private recordObj = {} as any;
   /** 多选模式下的多个节点 */
   private framesSnapShot: { left: number; top: number; id: string }[] = [];
   /** 布局方式：流式布局、绝对定位、固定定位 */
@@ -112,11 +115,22 @@ export default class DragResizeHelper {
 
     this.frameSnapShot.top = this.target.offsetTop;
     this.frameSnapShot.left = this.target.offsetLeft;
+    this.frameSnapShot.width = this.target.clientWidth;
+    this.frameSnapShot.height = this.target.clientHeight;
   }
 
   public onResize(e: OnResize): void {
     const { width, height, drag } = e;
     const { beforeTranslate } = drag;
+
+    this.resizeElChildren({
+      target: this.target,
+      ratio: {
+        width: width / this.frameSnapShot.width,
+        height: height / this.frameSnapShot.height,
+      },
+    });
+
     // 流式布局
     if (this.mode === Mode.SORTABLE) {
       this.target.style.top = '0px';
@@ -132,6 +146,14 @@ export default class DragResizeHelper {
 
     this.target.style.width = `${width}px`;
     this.target.style.height = `${height}px`;
+  }
+
+  public resizeEnd(): void {
+    this.recordObj = {};
+  }
+
+  public getChildrenRecord(): Rect[] {
+    return Object.values(this.recordObj);
   }
 
   public onDragStart(e: OnDragStart): void {
@@ -152,10 +174,13 @@ export default class DragResizeHelper {
       return;
     }
 
-    this.moveableHelper.onDrag(e);
+    const [offsetLeft, offSetTop] = e.beforeTranslate;
+    const left = this.frameSnapShot.left + offsetLeft;
+    const top = this.frameSnapShot.top + offSetTop;
 
-    this.target.style.left = `${this.frameSnapShot.left + e.beforeTranslate[0]}px`;
-    this.target.style.top = `${this.frameSnapShot.top + e.beforeTranslate[1]}px`;
+    this.target.style.left = `${left}px`;
+    this.target.style.top = `${top}px`;
+    this.moveableHelper.onDrag(e);
   }
 
   public onRotateStart(e: OnRotateStart): void {
@@ -218,13 +243,29 @@ export default class DragResizeHelper {
     const { events } = e;
     this.moveableHelper.onResizeGroupStart(e);
     this.setFramesSnapShot(events);
+    this.frameSnapShot.width = e.target.clientWidth;
+    this.frameSnapShot.height = e.target.clientHeight;
   }
 
   /**
    * 多选状态下通过拖拽边框改变大小，所有选中组件会一起改变大小
    */
   public onResizeGroup(e: OnResizeGroup): void {
+    const { clientWidth: width, clientHeight: height } = e.target;
+
+    // 拖动过程更新
+    this.targetList.forEach((target) => {
+      this.resizeElChildren({
+        target,
+        ratio: {
+          width: width / this.frameSnapShot.width,
+          height: height / this.frameSnapShot.height,
+        },
+      });
+    });
+
     const { events } = e;
+
     // 拖动过程更新
     events.forEach((ev) => {
       const { width, height, beforeTranslate } = ev.drag;
@@ -266,18 +307,17 @@ export default class DragResizeHelper {
       const frameSnapShot = this.framesSnapShot.find(
         (frameItem) => frameItem.id === ev.target.id.replace(DRAG_EL_ID_PREFIX, ''),
       );
+      // 判断此节点的快照存在
       if (!frameSnapShot) return;
       const targeEl = this.targetList.find(
         (targetItem) => targetItem.id === ev.target.id.replace(DRAG_EL_ID_PREFIX, ''),
       );
+      // 判断此节点存在
       if (!targeEl) return;
-      // 元素与其所属组同时加入多选列表时，只更新父元素
-      const isParentIncluded = this.targetList.find((targetItem) => targetItem.id === targeEl.parentElement?.id);
-      if (!isParentIncluded) {
-        // 更新页面元素位置
-        targeEl.style.left = `${frameSnapShot.left + ev.beforeTranslate[0]}px`;
-        targeEl.style.top = `${frameSnapShot.top + ev.beforeTranslate[1]}px`;
-      }
+
+      // 更新页面元素位置
+      targeEl.style.left = `${frameSnapShot.left + ev.beforeTranslate[0]}px`;
+      targeEl.style.top = `${frameSnapShot.top + ev.beforeTranslate[1]}px`;
     });
     this.moveableHelper.onDragGroup(e);
   }
@@ -372,5 +412,63 @@ export default class DragResizeHelper {
         this.setGhostElChildrenId(child);
       }
     }
+  }
+
+  /**
+   * 同步更新容器节点的子元素
+   */
+  // eslint-disable-next-line @typescript-eslint/member-ordering
+  public resizeElChildren({
+    target,
+    ratio,
+  }: {
+    target?: HTMLElement | null;
+    ratio?: {
+      width: number;
+      height: number;
+    };
+  } = {}) {
+    if (!target || !ratio || !this.recordObj) return;
+
+    const updateChild = (target: HTMLElement) => {
+      if (!target) return;
+      if (!this.recordObj[target.id]) {
+        this.recordObj[target.id] = elementStyle(target);
+      }
+      const targetOrigin = this.recordObj[target.id];
+
+      const toFixed = (position: number) => Math.floor(position * 100) / 100;
+
+      this.recordObj[target.id].style = {
+        top: toFixed(targetOrigin.top * ratio.height),
+        left: toFixed(targetOrigin.left * ratio.width),
+        width: toFixed(targetOrigin.width * ratio.width),
+        height: toFixed(targetOrigin.height * ratio.height),
+      };
+      this.recordObj[target.id].el = target;
+      const targetNow = this.recordObj[target.id].style;
+
+      target.style.left = `${targetNow.left}px`;
+      target.style.top = `${targetNow.top}px`;
+      target.style.width = `${targetNow.width}px`;
+      target.style.height = `${targetNow.height}px`;
+    };
+
+    const updateTargetChildren = (target: HTMLElement, isRoot: boolean) => {
+      if (!target?.id) return;
+
+      if (!isRoot) {
+        updateChild(target);
+      }
+
+      if (isContainerEl(target)) {
+        const children = (target.children as any) || [];
+        [...children].forEach((node) => {
+          updateTargetChildren(node as HTMLElement, false);
+        });
+      }
+    };
+
+    updateTargetChildren(target, true);
   }
 }

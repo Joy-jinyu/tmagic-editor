@@ -22,9 +22,16 @@ import Moveable, { MoveableOptions } from 'moveable';
 import { Mode } from './const';
 import DragResizeHelper from './DragResizeHelper';
 import MoveableOptionsManager from './MoveableOptionsManager';
-import type { DelayedMarkContainer, GetRenderDocument, MarkContainerEnd, StageDragResizeConfig } from './types';
+import type {
+  DelayedMarkContainer,
+  GetRenderDocument,
+  MarkContainer,
+  MarkContainerEnd,
+  Rect,
+  StageDragResizeConfig,
+} from './types';
 import { StageDragStatus } from './types';
-import { down, getMode, up } from './util';
+import { down, getMode, getMoveableBounds, isContainerEl, up } from './util';
 
 /**
  * 管理单选操作，响应选中操作，初始化moveableOption参数并初始化moveable，处理moveable回调事件对组件进行更新
@@ -40,6 +47,7 @@ export default class StageDragResize extends MoveableOptionsManager {
   private dragResizeHelper: DragResizeHelper;
   private disabledDragStart?: boolean;
   private getRenderDocument: GetRenderDocument;
+  private markContainer: MarkContainer;
   private markContainerEnd: MarkContainerEnd;
   private delayedMarkContainer: DelayedMarkContainer;
 
@@ -48,6 +56,7 @@ export default class StageDragResize extends MoveableOptionsManager {
 
     this.getRenderDocument = config.getRenderDocument;
     this.markContainerEnd = config.markContainerEnd;
+    this.markContainer = config.markContainer;
     this.delayedMarkContainer = config.delayedMarkContainer;
     this.disabledDragStart = config.disabledDragStart;
 
@@ -127,13 +136,18 @@ export default class StageDragResize extends MoveableOptionsManager {
     this.dragResizeHelper.updateShadowEl(el);
     this.dragResizeHelper.setMode(this.mode);
 
+    const parent = this.target?.parentElement;
     // 设置选中元素的周围元素，用于选中元素跟周围元素对齐辅助
-    const elementGuidelines: HTMLElement[] = Array.prototype.slice.call(this.target?.parentElement?.children) || [];
+    const elementGuidelines: HTMLElement[] = Array.prototype.slice.call(parent?.children) || [];
     this.setElementGuidelines([this.target as HTMLElement], elementGuidelines);
 
-    return this.getOptions(false, {
+    const options: MoveableOptions = {
       target: this.dragResizeHelper.getShadowEl(),
-    });
+    };
+    if (parent && isContainerEl(parent)) {
+      options.bounds = getMoveableBounds(parent);
+    }
+    return this.getOptions(false, options);
   }
 
   private initMoveable(el: HTMLElement) {
@@ -166,12 +180,15 @@ export default class StageDragResize extends MoveableOptionsManager {
         if (!this.moveable || !this.target || !this.dragResizeHelper.getShadowEl()) return;
 
         this.dragStatus = StageDragStatus.ING;
-
         this.dragResizeHelper.onResize(e);
       })
       .on('resizeEnd', () => {
         this.dragStatus = StageDragStatus.END;
-        this.update(true);
+        this.update({
+          isResize: true,
+          childrenList: this.dragResizeHelper.getChildrenRecord(),
+        });
+        this.dragResizeHelper.resizeEnd();
       });
   }
 
@@ -190,6 +207,7 @@ export default class StageDragResize extends MoveableOptionsManager {
       })
       .on('drag', (e) => {
         if (!this.target || !this.dragResizeHelper.getShadowEl()) return;
+        this.markContainer(e.inputEvent, [this.target]);
 
         if (timeout) {
           globalThis.clearTimeout(timeout);
@@ -211,7 +229,7 @@ export default class StageDragResize extends MoveableOptionsManager {
         // 点击不拖动时会触发dragStart和dragEnd，但是不会有drag事件
         if (this.dragStatus === StageDragStatus.ING) {
           if (parentEl) {
-            this.update(false, parentEl);
+            this.update({ parentEl });
           } else {
             switch (this.mode) {
               case Mode.SORTABLE:
@@ -305,7 +323,15 @@ export default class StageDragResize extends MoveableOptionsManager {
     }
   }
 
-  private update(isResize = false, parentEl: HTMLElement | null = null): void {
+  private update({
+    isResize = false,
+    parentEl = null,
+    childrenList = [],
+  }: {
+    isResize?: boolean;
+    parentEl?: HTMLElement | null;
+    childrenList?: Rect[];
+  } = {}): void {
     if (!this.target) return;
 
     const doc = this.getRenderDocument();
@@ -320,6 +346,7 @@ export default class StageDragResize extends MoveableOptionsManager {
           el: this.target,
           style: isResize ? rect : { left: rect.left, top: rect.top },
         },
+        ...childrenList,
       ],
       parentEl,
     });

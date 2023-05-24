@@ -145,6 +145,7 @@ export interface EditorNodeInfo {
   node: MNode | null;
   parent: MContainer | null;
   page: MPage | null;
+  rootChild?: MNode;
 }
 
 export interface AddMNode {

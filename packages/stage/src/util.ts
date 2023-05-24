@@ -17,7 +17,7 @@
  */
 import { removeClassName } from '@tmagic/utils';
 
-import { GHOST_EL_ID_PREFIX, Mode, SELECTED_CLASS, ZIndex } from './const';
+import { CONTAINER_ID_PREFIX, GHOST_EL_ID_PREFIX, Mode, SELECTED_CLASS, ZIndex } from './const';
 import type { Offset, SortEventData, TargetElement } from './types';
 
 const getParents = (el: Element, relative: Element) => {
@@ -242,3 +242,39 @@ export const up = (deltaTop: number, target: TargetElement): SortEventData | voi
 
 export const isMoveableButton = (target: Element) =>
   target.classList.contains('moveable-button') || target.parentElement?.classList.contains('moveable-button');
+
+export const elementStyle = (target: HTMLElement) => {
+  if (!target)
+    return {
+      left: 0,
+      top: 0,
+      width: 0,
+      height: 0,
+    };
+
+  const { width, height } = target.getBoundingClientRect();
+  return {
+    width,
+    height,
+    left: target.offsetLeft,
+    top: target.offsetTop,
+  };
+};
+
+/** 是否是容器节点 */
+export const isContainerEl = (el: HTMLElement) => {
+  if (!el) return false;
+  return el.id.indexOf(CONTAINER_ID_PREFIX) !== -1;
+};
+
+/** 获取moveable限制的bounds */
+export const getMoveableBounds = (parentEl: HTMLElement) => {
+  const { top, left } = getOffset(parentEl);
+  const { width, height } = parentEl.getBoundingClientRect();
+  return {
+    top,
+    left,
+    right: left + width,
+    bottom: top + height,
+  };
+};

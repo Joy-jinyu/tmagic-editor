@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-import Moveable from 'moveable';
+import Moveable, { MoveableOptions } from 'moveable';
 
 import { DRAG_EL_ID_PREFIX, Mode } from './const';
 import DragResizeHelper from './DragResizeHelper';
@@ -24,12 +24,14 @@ import MoveableOptionsManager from './MoveableOptionsManager';
 import {
   DelayedMarkContainer,
   GetRenderDocument,
+  MarkContainer,
   MarkContainerEnd,
   MoveableOptionsManagerConfig,
+  Rect,
   StageDragStatus,
   StageMultiDragResizeConfig,
 } from './types';
-import { getMode } from './util';
+import { getMode, getMoveableBounds, isContainerEl } from './util';
 
 export default class StageMultiDragResize extends MoveableOptionsManager {
   /** 画布容器 */
@@ -41,6 +43,7 @@ export default class StageMultiDragResize extends MoveableOptionsManager {
   public dragStatus: StageDragStatus = StageDragStatus.END;
   private dragResizeHelper: DragResizeHelper;
   private getRenderDocument: GetRenderDocument;
+  private markContainer: MarkContainer;
   private delayedMarkContainer: DelayedMarkContainer;
   private markContainerEnd: MarkContainerEnd;
 
@@ -52,9 +55,11 @@ export default class StageMultiDragResize extends MoveableOptionsManager {
     };
     super(moveableOptionsManagerConfig);
 
+    this.markContainer = config.markContainer;
     this.delayedMarkContainer = config.delayedMarkContainer;
     this.markContainerEnd = config.markContainerEnd;
     this.container = config.container;
+    this.markContainerEnd = config.markContainerEnd;
     this.getRenderDocument = config.getRenderDocument;
 
     this.dragResizeHelper = config.dragResizeHelper;
@@ -79,19 +84,21 @@ export default class StageMultiDragResize extends MoveableOptionsManager {
 
     this.dragResizeHelper.updateGroup(els);
 
+    const parent = this.targetList[0].parentElement;
     // 设置周围元素，用于选中元素跟周围元素的对齐辅助
-    const elementGuidelines: HTMLElement[] =
-      Array.prototype.slice.call(this.targetList[0].parentElement?.children) || [];
+    const elementGuidelines: HTMLElement[] = Array.prototype.slice.call(parent?.children) || [];
     this.setElementGuidelines(this.targetList, elementGuidelines);
 
     this.moveableForMulti?.destroy();
     this.dragResizeHelper.clear();
-    this.moveableForMulti = new Moveable(
-      this.container,
-      this.getOptions(true, {
-        target: this.dragResizeHelper.getShadowEls(),
-      }),
-    );
+
+    const options: MoveableOptions = {
+      target: this.dragResizeHelper.getShadowEls(),
+    };
+    if (parent && isContainerEl(parent)) {
+      options.bounds = getMoveableBounds(parent);
+    }
+    this.moveableForMulti = new Moveable(this.container, this.getOptions(true, options));
 
     let timeout: NodeJS.Timeout | undefined;
 
@@ -105,14 +112,19 @@ export default class StageMultiDragResize extends MoveableOptionsManager {
         this.dragStatus = StageDragStatus.ING;
       })
       .on('resizeGroupEnd', () => {
-        this.update(true);
         this.dragStatus = StageDragStatus.END;
+        this.update({
+          isResize: true,
+          childrenList: this.dragResizeHelper.getChildrenRecord(),
+        });
+        this.dragResizeHelper.resizeEnd();
       })
       .on('dragGroupStart', (e) => {
         this.dragResizeHelper.onDragGroupStart(e);
         this.dragStatus = StageDragStatus.START;
       })
       .on('dragGroup', (e) => {
+        this.markContainer(e.inputEvent, e.targets);
         if (timeout) {
           globalThis.clearTimeout(timeout);
           timeout = undefined;
@@ -124,7 +136,7 @@ export default class StageMultiDragResize extends MoveableOptionsManager {
       })
       .on('dragGroupEnd', () => {
         const parentEl = this.markContainerEnd();
-        this.update(false, parentEl);
+        this.update({ isResize: false, parentEl });
         this.dragStatus = StageDragStatus.END;
       })
       .on('clickGroup', (e) => {
@@ -199,7 +211,15 @@ export default class StageMultiDragResize extends MoveableOptionsManager {
    * 拖拽完成后将更新的位置信息暴露给上层业务方，业务方可以接收事件进行保存
    * @param isResize 是否进行大小缩放
    */
-  private update(isResize = false, parentEl: HTMLElement | null = null): void {
+  private update({
+    isResize = false,
+    childrenList = [],
+    parentEl = null,
+  }: {
+    isResize?: boolean;
+    parentEl?: HTMLElement | null;
+    childrenList?: Rect[];
+  } = {}): void {
     if (this.targetList.length === 0) return;
 
     const doc = this.getRenderDocument();
@@ -212,6 +232,6 @@ export default class StageMultiDragResize extends MoveableOptionsManager {
         style: isResize ? rect : { left: rect.left, top: rect.top },
       };
     });
-    this.emit('update', { data, parentEl });
+    this.emit('update', { data: [...data, ...childrenList], parentEl });
   }
 }

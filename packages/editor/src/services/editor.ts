@@ -157,6 +157,7 @@ class Editor extends BaseService {
 
     info.node = path[path.length - 1] as MComponent;
     info.parent = path[path.length - 2] as MContainer;
+    info.rootChild = path[2] as MComponent;
 
     path.forEach((item) => {
       if (item.type === NodeType.PAGE) {
@@ -492,6 +493,13 @@ class Editor extends BaseService {
       }
     });
 
+    // 修正node config的layout
+    const newLayout = await this.getLayout(newConfig);
+    const layout = await this.getLayout(node);
+    if (newLayout !== layout) {
+      newConfig = setLayout(newConfig, newLayout);
+    }
+
     if (!newConfig.type) throw new Error('配置缺少type值');
 
     if (newConfig.type === NodeType.ROOT) {
@@ -499,7 +507,9 @@ class Editor extends BaseService {
       return newConfig;
     }
 
-    const { parent } = info;
+    // 【微任务】执行机制的原因 导致当前执行时，它的节点信息已经变更
+    const latestInfo = this.getNodeInfo(config.id, false);
+    const { parent } = latestInfo;
     if (!parent) throw new Error('获取不到父级节点');
 
     const parentNodeItems = parent.items;
@@ -507,12 +517,7 @@ class Editor extends BaseService {
 
     if (!parentNodeItems || typeof index === 'undefined' || index === -1) throw new Error('更新的节点未找到');
 
-    const newLayout = await this.getLayout(newConfig);
-    const layout = await this.getLayout(node);
-    if (newLayout !== layout) {
-      newConfig = setLayout(newConfig, newLayout);
-    }
-
+    // 更新 page 当前节点
     parentNodeItems[index] = newConfig;
 
     // 将update后的配置更新到nodes中

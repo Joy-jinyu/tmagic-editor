@@ -59,7 +59,7 @@ import { MContainer, NodeType } from '@tmagic/schema';
 import { getNodePath, isPage } from '@tmagic/utils';
 
 import SearchInput from '@editor/components/SearchInput.vue';
-import type { MenuButton, MenuComponent, Services } from '@editor/type';
+import type { EditorNodeInfo, MenuButton, MenuComponent, Services } from '@editor/type';
 import { Layout } from '@editor/type';
 
 import LayerMenu from './LayerMenu.vue';
@@ -89,7 +89,7 @@ const treeProps = {
   children: 'items',
   label: 'name',
   value: 'id',
-  disabled: (data: MNode) => Boolean(data.items?.length),
+  disabled: (data: MNode) => data.type === NodeType.PAGE,
   class: (data: MNode) => {
     if (clicked.value || isPage(data)) return '';
     if (data.id === highlightNode?.value?.id && !checkedKeys.value.includes(data.id)) {
@@ -106,12 +106,20 @@ const values = computed(() => (page.value ? [page.value] : []));
 // 高亮的节点
 const highlightNode = computed(() => editorService?.get('highlightNode'));
 
+// 单选选中的节点
+const selectedNode = ref<MNode>();
+// 多选选中的节点数组
+const selectedNodes = ref<MNode[]>([]);
+// 多选选中的组件id数组
+const selectedIds = computed(() => selectedNodes.value.map((node: MNode) => node.id));
+
 // 触发画布单选
 const select = async (data: MNode) => {
   if (!data.id) {
     throw new Error('没有id');
   }
 
+  selectedNode.value = data;
   await editorService?.select(data);
   editorService?.get('stage')?.select(data.id);
 };
@@ -225,13 +233,6 @@ watch(nodes, (nodes) => {
   });
 });
 
-watch(isMultiSelect, (isMultiSelect) => {
-  if (!isMultiSelect) {
-    currentNodeKey.value = editorService?.get('node')?.id;
-    tree.value?.setCurrentKey(currentNodeKey.value);
-  }
-});
-
 const editorServiceRemoveHandler = () => {
   setTimeout(() => {
     tree.value?.getNode(editorService?.get('node')?.id)?.updateChildren();
@@ -284,22 +285,41 @@ const toggleClickFlag = () => {
 };
 
 // 选择节点多选框
-const checkHandler = (data: MNode, { checkedNodes }: any): void => {
-  if (!isCtrlKeyDown.value && nodes.value.length < 2) {
-    return;
+const checkHandler = (data: MNode): void => {
+  // 如果是从单选模式切换到多选模式，则将单选的加到之前选中的
+  if (selectedNode.value) {
+    selectedNodes.value = [selectedNode.value];
+    selectedNode.value = undefined;
   }
-  if (checkedNodes.length > 0) {
-    multiSelect(checkedNodes.map((node: MNode) => node.id));
+
+  // 判断元素是否已在多选列表
+  const existIndex = selectedNodes.value.findIndex((node) => node.id === data.id);
+  if (existIndex !== -1) {
+    // 再次点击取消选中
+    selectedNodes.value.length > 1 && selectedNodes.value.splice(existIndex, 1);
   } else {
-    multiSelect(nodes.value.map((node: MNode) => node.id));
+    // 已存在选中的节点 只能选择同层级的元素
+    if (selectedNodes.value.length) {
+      const firstSelectedNodeInfo = editorService?.getNodeInfo(selectedNodes.value[0].id) as EditorNodeInfo;
+      const levelNode = firstSelectedNodeInfo.parent?.items || [];
+      if (levelNode.some((node) => node.id === data.id)) {
+        selectedNodes.value.push(data);
+      } else {
+        selectedNodes.value = [data];
+      }
+    } else {
+      selectedNodes.value = [data];
+    }
   }
+
+  tree.value?.setCheckedKeys(selectedIds.value);
+  multiSelect(selectedIds.value);
 };
 
 // 点击节点
 const clickHandler = (data: MNode): void => {
-  if (isCtrlKeyDown.value) {
-    return;
-  }
+  if (isMultiSelect.value) return;
+
   if (services?.uiService.get('uiSelectMode')) {
     document.dispatchEvent(new CustomEvent('ui-select', { detail: data }));
     return;

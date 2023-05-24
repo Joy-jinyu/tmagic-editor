@@ -24,7 +24,14 @@ import { Env } from '@tmagic/core';
 import { Id } from '@tmagic/schema';
 import { addClassName, getDocument, removeClassNameByClassName } from '@tmagic/utils';
 
-import { CONTAINER_HIGHLIGHT_CLASS_NAME, GHOST_EL_ID_PREFIX, GuidesType, MouseButton, PAGE_CLASS } from './const';
+import {
+  CONTAINER_HIGHLIGHT_CLASS_NAME_INSERT,
+  CONTAINER_HIGHLIGHT_CLASS_NAME_MARK,
+  GHOST_EL_ID_PREFIX,
+  GuidesType,
+  MouseButton,
+  PAGE_CLASS,
+} from './const';
 import DragResizeHelper from './DragResizeHelper';
 import StageDragResize from './StageDragResize';
 import StageHighlight from './StageHighlight';
@@ -70,6 +77,8 @@ export default class ActionManager extends EventEmitter {
   private isMultiSelectStatus = false;
   /** 当拖拽组件到容器上方进入可加入容器状态时，给容器添加的一个class名称 */
   private containerHighlightClassName: string;
+  /** 当容器子元素在拖拽时，给容器添加的一个class名称 */
+  private containerHighlightMarkClassName: string;
   /** 当拖拽组件到容器上方时，需要悬停多久才能将组件加入容器 */
   private containerHighlightDuration: number;
   /** 将组件加入容器的操作方式 */
@@ -93,7 +102,8 @@ export default class ActionManager extends EventEmitter {
   constructor(config: ActionManagerConfig) {
     super();
     this.container = config.container;
-    this.containerHighlightClassName = config.containerHighlightClassName || CONTAINER_HIGHLIGHT_CLASS_NAME;
+    this.containerHighlightClassName = config.containerHighlightClassName || CONTAINER_HIGHLIGHT_CLASS_NAME_INSERT;
+    this.containerHighlightMarkClassName = CONTAINER_HIGHLIGHT_CLASS_NAME_MARK;
     this.containerHighlightDuration = config.containerHighlightDuration || defaultContainerHighlightDuration;
     this.containerHighlightType = config.containerHighlightType;
     this.getTargetElement = config.getTargetElement;
@@ -116,6 +126,7 @@ export default class ActionManager extends EventEmitter {
       getRootContainer: config.getRootContainer,
       getRenderDocument: config.getRenderDocument,
       markContainerEnd: this.markContainerEnd.bind(this),
+      markContainer: this.markContainer.bind(this),
       delayedMarkContainer: this.delayedMarkContainer.bind(this),
     });
     this.multiDr = new StageMultiDragResize({
@@ -125,7 +136,9 @@ export default class ActionManager extends EventEmitter {
       getRootContainer: config.getRootContainer,
       getRenderDocument: config.getRenderDocument,
       markContainerEnd: this.markContainerEnd.bind(this),
+      markContainer: this.markContainer.bind(this),
       delayedMarkContainer: this.delayedMarkContainer.bind(this),
+      updateDragEl: config.updateDragEl,
     });
     this.highlightLayer = new StageHighlight({
       container: config.container,
@@ -304,6 +317,16 @@ export default class ActionManager extends EventEmitter {
    * @param excludeElList 计算鼠标点所在容器时要排除的元素列表
    */
   public async addContainerHighlightClassName(event: MouseEvent, excludeElList: Element[]): Promise<void> {
+    this.addContainerClassName(event, excludeElList, this.containerHighlightClassName);
+  }
+
+  /**
+   * 找到鼠标下方的容器，通过添加className对容器进行标记
+   * @param event 鼠标事件
+   * @param excludeElList 计算鼠标点所在容器时要排除的元素列表
+   * @param className 要增加的样式
+   */
+  public async addContainerClassName(event: MouseEvent, excludeElList: Element[], className: string): Promise<void> {
     const doc = this.getRenderDocument();
     if (!doc) return;
 
@@ -311,7 +334,7 @@ export default class ActionManager extends EventEmitter {
 
     for (const el of els) {
       if (!el.id.startsWith(GHOST_EL_ID_PREFIX) && (await this.isContainer(el)) && !excludeElList.includes(el)) {
-        addClassName(el, doc, this.containerHighlightClassName);
+        addClassName(el, doc, className);
         break;
       }
     }
@@ -331,6 +354,13 @@ export default class ActionManager extends EventEmitter {
       }, this.containerHighlightDuration);
     }
     return undefined;
+  }
+
+  /**
+   * 当前容器内容操作，容器需要标记操作范围
+   */
+  public markContainer(event: MouseEvent, excludeElList: Element[] = []) {
+    this.addContainerClassName(event, excludeElList, this.containerHighlightMarkClassName);
   }
 
   public destroy(): void {
@@ -380,7 +410,17 @@ export default class ActionManager extends EventEmitter {
       // 再次点击取消选中
       this.selectedElList.splice(existIndex, 1);
     } else {
-      this.selectedElList.push(el);
+      // 已存在选中的节点 只能选择同层级的元素
+      if (this.selectedElList.length) {
+        const levelNode = this.selectedElList[0].parentElement?.children as any;
+        if ([...levelNode].some((node) => node.id === el.id)) {
+          this.selectedElList.push(el);
+        } else {
+          this.selectedElList = [this.getRootContainer(el)];
+        }
+      } else {
+        this.selectedElList = [this.getRootContainer(el)];
+      }
     }
   }
 
@@ -400,7 +440,10 @@ export default class ActionManager extends EventEmitter {
    */
   private markContainerEnd(): HTMLElement | null {
     const doc = this.getRenderDocument();
-    if (doc && this.canAddToContainer()) {
+    if (!doc) return null;
+    removeClassNameByClassName(doc, this.containerHighlightMarkClassName);
+
+    if (this.canAddToContainer()) {
       return removeClassNameByClassName(doc, this.containerHighlightClassName);
     }
     return null;
@@ -484,6 +527,14 @@ export default class ActionManager extends EventEmitter {
       });
   }
 
+  // 选中当前节点最外层的容器
+  private getRootContainer = (el: HTMLElement): HTMLElement => {
+    if (!el) return el;
+    const { parentElement } = el;
+    if (parentElement?.className.includes(PAGE_CLASS)) return el;
+    return this.getRootContainer(el.parentElement as HTMLElement);
+  };
+
   /**
    * 在down事件中集中cpu处理画布中选中操作渲染，在up事件中再通知外面的编辑器更新
    */
@@ -497,17 +548,46 @@ export default class ActionManager extends EventEmitter {
     // 点击状态下不触发高亮事件
     this.container.removeEventListener('mousemove', this.mouseMoveHandler);
 
-    // 判断触发多选还是单选
-    if (this.isMultiSelectStatus) {
-      await this.beforeMultiSelect(event);
-      if (this.selectedElList.length > 0) {
-        this.emit('before-multi-select', this.selectedElList);
+    const isRoot = (el: HTMLElement) => el.className.includes(PAGE_CLASS);
+
+    const emitMouseEvent = async () => {
+      // 判断触发多选还是单选
+      if (this.isMultiSelectStatus) {
+        await this.beforeMultiSelect(event);
+        if (this.selectedElList.length > 0) {
+          this.emit('before-multi-select', this.selectedElList);
+        }
+      } else {
+        const el = await this.getElementFromPoint(event);
+        if (!el) return;
+
+        if (isRoot(el)) {
+          this.emit('before-select', el, event);
+          return;
+        }
+
+        // /**
+        //  * 如果当前已经已经有选中的了 且 不是根节点
+        //  * * 可以选中同层级的节点
+        //  * * 可以选中当前层级的子节点
+        //  */
+        if (this.selectedEl && !isRoot(this.selectedEl)) {
+          // 同层级的节点
+          const levelNode = this.selectedEl.parentElement?.children as any;
+          // 子节点
+          const childrenNode = this.selectedEl.children as any;
+          if ([...levelNode, ...childrenNode].some((node) => node.id === el.id)) {
+            this.emit('before-select', el, event);
+            return;
+          }
+        }
+
+        const rootEl = this.getRootContainer(el);
+        if (!rootEl) return;
+        this.emit('before-select', rootEl, event);
       }
-    } else {
-      const el = await this.getElementFromPoint(event);
-      if (!el) return;
-      this.emit('before-select', el, event);
-    }
+    };
+    emitMouseEvent();
     getDocument().addEventListener('mouseup', this.mouseUpHandler);
   };
 

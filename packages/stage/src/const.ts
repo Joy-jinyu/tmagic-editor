@@ -25,9 +25,16 @@ export const DRAG_EL_ID_PREFIX = 'drag_el_';
 /** 高亮时需要在蒙层中创建一个占位节点，该节点的id前缀 */
 export const HIGHLIGHT_EL_ID_PREFIX = 'highlight_el_';
 
-export const CONTAINER_HIGHLIGHT_CLASS_NAME = 'tmagic-stage-container-highlight';
+/** 容器高亮 插入状态 */
+export const CONTAINER_HIGHLIGHT_CLASS_NAME_INSERT = 'tmagic-stage-container-highlight--insert';
+
+/** 容器高亮 标记状态 */
+export const CONTAINER_HIGHLIGHT_CLASS_NAME_MARK = 'tmagic-stage-container-highlight--mark';
 
 export const PAGE_CLASS = 'magic-ui-page';
+
+export const CONTAINER_ID_PREFIX = 'container_';
+export const DRAG_EL_CONTAINER_ID_PREFIX = 'drag_el_container_';
 
 /** 默认放到缩小倍数 */
 export const DEFAULT_ZOOM = 1;

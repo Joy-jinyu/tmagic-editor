@@ -40,6 +40,7 @@ export type GetTargetElement = (idOrEl: Id | HTMLElement) => HTMLElement;
 /** render提供的接口，通过坐标获得坐标下所有HTML元素数组 */
 export type GetElementsFromPoint = (point: Point) => HTMLElement[];
 export type GetRenderDocument = () => Document | undefined;
+export type MarkContainer = (event: MouseEvent, exclude: Element[]) => void;
 export type DelayedMarkContainer = (event: MouseEvent, exclude: Element[]) => NodeJS.Timeout | undefined;
 export type MarkContainerEnd = () => HTMLElement | null;
 export type GetRootContainer = () => HTMLDivElement | undefined;
@@ -119,6 +120,7 @@ export interface StageDragResizeConfig {
   getRootContainer: GetRootContainer;
   getRenderDocument: GetRenderDocument;
   markContainerEnd: MarkContainerEnd;
+  markContainer: MarkContainer;
   delayedMarkContainer: DelayedMarkContainer;
 }
 
@@ -129,7 +131,9 @@ export interface StageMultiDragResizeConfig {
   getRootContainer: GetRootContainer;
   getRenderDocument: GetRenderDocument;
   markContainerEnd: MarkContainerEnd;
+  markContainer: MarkContainer;
   delayedMarkContainer: DelayedMarkContainer;
+  updateDragEl?: UpdateDragEl;
 }
 
 export interface DragResizeHelperConfig {
@@ -173,6 +177,20 @@ export interface Point {
 export interface GuidesEventData {
   type: GuidesType;
   guides: number[];
+}
+
+export interface RecordEvent {
+  el?: HTMLElement;
+  style: {
+    width?: number;
+    height?: number;
+    left?: number;
+    top?: number;
+    transform?: {
+      rotate?: string;
+      scale?: string;
+    };
+  };
 }
 
 export interface UpdateEventData {
